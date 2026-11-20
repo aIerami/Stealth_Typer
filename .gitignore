@@ -1,0 +1,6 @@
+edge_user_data/
+__pycache__/
+*.pyc
+stealth-env/
+.env
+error_*.png
