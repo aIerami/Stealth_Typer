@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Скрытный посимвольный ввод текста в браузере.
-Используется Patchright (без внешних stealth-плагинов) + HumanTyping.
-Никаких fill(), insert_text(), execCommand('insertText') или прямой установки value.
-"""
 
 import asyncio
 import random
@@ -12,6 +7,11 @@ from pathlib import Path
 
 from patchright.async_api import async_playwright
 from humantyping import HumanTyper
+
+try:
+    import humantyping.config as ht_config
+except ImportError:
+    ht_config = None
 
 import config as cfg
 
@@ -27,18 +27,46 @@ def load_text() -> str:
     return cfg.TEXT_INLINE.strip()
 
 
+def apply_error_rates() -> None:
+    """Переопределяет вероятности ошибок в конфиге HumanTyping, если возможно."""
+    if ht_config is None:
+        print("[!] Не удалось импортировать humantyping.config — "
+              "вероятности ошибок останутся стандартными (4% / 1.5%).")
+        return
+
+    # В Python-версии HumanTyping имена могут отличаться.
+    # Пробуем установить оба известных варианта.
+    try:
+        if hasattr(ht_config, "PROB_ERROR"):
+            ht_config.PROB_ERROR = cfg.ERROR_RATE
+        elif hasattr(ht_config, "ERROR_RATE"):
+            ht_config.ERROR_RATE = cfg.ERROR_RATE
+        else:
+            print("[!] В humantyping.config не найдена переменная вероятности опечаток.")
+
+        if hasattr(ht_config, "PROB_SWAP_ERROR"):
+            ht_config.PROB_SWAP_ERROR = cfg.SWAP_ERROR_RATE
+        elif hasattr(ht_config, "SWAP_ERROR_RATE"):
+            ht_config.SWAP_ERROR_RATE = cfg.SWAP_ERROR_RATE
+        else:
+            print("[!] В humantyping.config не найдена переменная вероятности перестановок.")
+    except Exception as e:
+        print(f"[!] Не удалось переопределить вероятности ошибок: {e}")
+
+
 async def main() -> None:
     text = load_text()
     if not text:
         print("[!] Нет текста для ввода. Проверьте input_text.txt или TEXT_INLINE.")
         return
 
-    # Выбираем случайную скорость из заданного диапазона
+    # Применяем вероятности ошибок до создания HumanTyper
+    apply_error_rates()
+
     wpm = random.randint(cfg.WPM_MIN, cfg.WPM_MAX)
     print(f"[i] Целевая скорость: {wpm} WPM")
 
     async with async_playwright() as p:
-        # launch_persistent_context с профилем — сохраняет куки и сессии
         context = await p.chromium.launch_persistent_context(
             user_data_dir=cfg.USER_DATA_DIR,
             channel=cfg.BROWSER_CHANNEL,
@@ -77,13 +105,8 @@ async def main() -> None:
             await field.click()
             print("[i] Клик по полю выполнен. Начинаю посимвольный ввод…")
 
-            # Создаём HumanTyper с настройками из конфига
-            typer = HumanTyper(
-                wpm=wpm,
-                layout=cfg.LAYOUT,
-                error_rate=cfg.ERROR_RATE,
-                swap_error_rate=cfg.SWAP_ERROR_RATE,
-            )
+            # HumanTyper принимает wpm и layout; вероятности ошибок заданы выше.
+            typer = HumanTyper(wpm=wpm, layout=cfg.LAYOUT)
 
             try:
                 await typer.type(field, text)
