@@ -50,7 +50,7 @@
 ### 1. Клонировать репозиторий
 
 ```bash
-git clone https://github.com/<ваш-username>/stealth-typer.git
+git clone https://github.com/aIeami/stealth-typer.git
 cd stealth-typer
 ```
 
