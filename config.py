@@ -11,14 +11,16 @@ NO_VIEWPORT = True                          # рекомендуется Patchri
 BROWSER_ARGS = []
 
 # ========== СТРАНИЦА ==========
-TARGET_URL = "https://google.com"          # замените на реальный URL
-FIELD_SELECTOR = "textarea[name='q']"           # замените на реальный селектор поля
-WAIT_FOR_MANUAL_LOGIN = False               # True при первом запуске, если нужен ручной вход
+TARGET_URL = "https://google.com"           # замените на реальный URL
+FIELD_SELECTOR = "textarea[name=q]"         # замените на реальный селектор поля
+FIELD_INDEX = 0
+WAIT_FOR_MANUAL_LOGIN = True                # True при первом запуске, если нужен ручной вход
 PAGE_LOAD_TIMEOUT_MS = 30_000               # таймаут загрузки страницы (30 сек)
 
 # ========== MONACO ==========
 TARGET_LINE = 99                            # строка, на которую встать перед вводом (Monaco)
-DISABLE_MONACO_AUTO_CLOSE = True            # отключать авто-закрытие скобок/кавычек через API
+USE_HTML_AUTOCLOSE = True                   # True — печатать только <tag>, autoclose добавит </tag>
+MONACO_CLEANUP = False                      # False — без пост-очистки (autoclose используется штатно)
 
 # ========== CDP-ВВОД ==========
 CDP_DEBUG = False                           # True — печатать в консоль каждый отправленный keyDown/keyUp
