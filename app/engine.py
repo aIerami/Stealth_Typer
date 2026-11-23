@@ -218,6 +218,22 @@ def _closer_at(text: str, i: int):
     return None
 
 
+class _FlushingProbe:
+    """Обёртка над редактором: перед каждым чтением его состояния дожидается отправленных нажатий."""
+
+    def __init__(self, probe, flush):
+        self._probe, self._flush = probe, flush
+
+    def __getattr__(self, name):
+        attr = getattr(self._probe, name)
+        if name in ("state", "peek", "line_info", "read_text") and callable(attr):
+            async def wrapper(*a, **kw):
+                await self._flush()
+                return await attr(*a, **kw)
+            return wrapper
+        return attr
+
+
 class Typist:
     """
     Печатает текст «как человек, у которого редактор помогает»:
@@ -236,7 +252,8 @@ class Typist:
         probe:  async state() -> (offset, total) | None; по возможности ещё
                 async peek(n) -> текст справа от курсора, async line_info() -> (до курсора, вся строка)
         """
-        self.drv, self.probe, self.cfg = driver, probe, cfg
+        self.drv, self.cfg = driver, cfg
+        self.probe = _FlushingProbe(probe, self._flush) if probe is not None else None
         self.rng = rng or random.Random(cfg.RANDOM_SEED)
         self._sleep_fn = sleep or asyncio.sleep
         self.now = now or time.monotonic
@@ -252,6 +269,8 @@ class Typist:
         self.in_indent = True
         self.t0 = 0.0
         self._since_sync = 0
+        self._pending = []             # отправленные, но ещё не подтверждённые нажатия (турбо)
+        self._due = None               # «расписание»: когда должен начаться следующий знак
         self._ac_seen = False          # сайт хоть раз вставлял закрывающий тег
         self._ac_misses = 0            # сколько раз подряд ждали тег, а его не было
         self.stats = dict(typos=0, junk_removed=0, indent_fixed=0, anomalies=0, skipped_tags=0,
@@ -277,16 +296,51 @@ class Typist:
         ужимаются при высокой скорости: на 70 WPM и ниже они как есть, на 500 WPM — примерно в 7 раз короче."""
         return min(1.0, 70.0 / max(1.0, self.speed.wpm()))
 
-    async def _sleep(self, s: float) -> None:
-        """Задержка, масштабируемая под скорость."""
-        s *= self._scale()
-        if s > 0:
+    @property
+    def turbo(self) -> bool:
+        """Быстрый режим: на высокой скорости нажатия уходят в браузер «пачкой», без ожидания ответа на каждое."""
+        lim = getattr(self.cfg, "TURBO_FROM_WPM", 150)
+        return bool(lim) and self.speed.wpm() >= lim
+
+    async def _wait(self, s: float) -> None:
+        """Одна реальная задержка. Короткие (< 20 мс) на Windows asyncio.sleep округляет до ~15 мс,
+        поэтому их отсчитываем «вращением» цикла — точнее, ценой небольшой нагрузки на процессор."""
+        if s <= 0:
+            return
+        if self._sleep_fn is asyncio.sleep and s < 0.02:
+            end = time.perf_counter() + s
+            while time.perf_counter() < end:
+                await asyncio.sleep(0)
+        else:
             await self._sleep_fn(s)
 
-    async def _raw(self, s: float) -> None:
-        """Точная задержка (время удержания клавиши, интервал между клавишами, ожидание сайта)."""
+    async def _sleep(self, s: float) -> None:
+        """Человеческая пауза, масштабируется под скорость и сдвигает расписание."""
+        s *= self._scale()
         if s > 0:
-            await self._sleep_fn(s)
+            if self._due is not None:
+                self._due += s
+            await self._wait(s)
+
+    async def _raw(self, s: float, shift_due: bool = True) -> None:
+        """Точная задержка (удержание клавиши, ожидание сайта). Сдвигает расписание, если shift_due."""
+        if s > 0:
+            if shift_due and self._due is not None:
+                self._due += s
+            await self._wait(s)
+
+    async def _until_due(self, interval: float) -> None:
+        """Ждать до момента «начала следующего знака». Время, потраченное на сетевые вызовы, не накапливается."""
+        now = self.now()
+        if self._due is None or self._due < now - 0.25:
+            self._due = now                      # сильно отстали (или пауза) — расписание с чистого листа
+        self._due += interval
+        await self._wait(self._due - now)
+
+    async def _flush(self) -> None:
+        if self._pending:
+            tasks, self._pending = self._pending, []
+            await asyncio.gather(*tasks)
 
     def _noise(self, sigma: float) -> float:
         return math.exp(self.rng.gauss(-sigma * sigma / 2.0, sigma))
@@ -294,19 +348,29 @@ class Typist:
     # ---------- низкоуровневые нажатия ----------
 
     async def _key(self, typ, k: Key, mods=0, text=""):
-        await self.drv.key(typ, k.key, k.code, k.vk, mods, text, k.unmod)
+        coro = self.drv.key(typ, k.key, k.code, k.vk, mods, text, k.unmod)
+        if self.turbo:
+            self._pending.append(asyncio.ensure_future(coro))   # порядок сохраняется, ответ не ждём
+            if len(self._pending) >= 64:
+                await self._flush()
+        else:
+            await self._flush()
+            await coro
 
     async def _press(self, k: Key, hold: float) -> None:
         mods = SHIFT_MOD if k.shift else 0
         if k.shift:
             await self._key("rawKeyDown", SHIFT_KEY, SHIFT_MOD)
-            await self._sleep(self.rng.uniform(0.02, 0.07))
+            if not self.turbo:
+                await self._sleep(self.rng.uniform(0.02, 0.07))
         typ = "keyDown" if k.text else "rawKeyDown"
         await self._key(typ, k, mods, k.text)
-        await self._raw(hold)
+        if not self.turbo:
+            await self._raw(hold, shift_due=False)
         await self._key("keyUp", k, mods)
         if k.shift:
-            await self._sleep(self.rng.uniform(0.01, 0.05))
+            if not self.turbo:
+                await self._sleep(self.rng.uniform(0.01, 0.05))
             await self._key("keyUp", SHIFT_KEY, 0)
 
     def _hold(self, interval: float) -> float:
@@ -333,6 +397,7 @@ class Typist:
     # ---------- синхронизация с редактором ----------
 
     async def _state(self):
+        await self._flush()                 # сначала дожидаемся всех отправленных нажатий
         if self.probe is None:
             return None
         return await self.probe.state()
@@ -626,7 +691,7 @@ class Typist:
             self._since_sync = 0
             await self._sync(wait_growth=bool(opened), after_newline=(ch == "\n"),
                              opened=opened, pair=pair, closer=closer)
-        await self._raw(max(0.004, interval - hold))
+        await self._until_due(interval)
 
         if ch == "\n":
             self.in_indent = True
@@ -688,6 +753,7 @@ class Typist:
             self.base_off, total = st[0], st[1]
             self.tail0 = total - st[0]
         self.t0 = self.now()
+        self._due = self.t0
         self._last_progress = self.t0
         self.in_indent = True
         i, n = 0, len(text)
@@ -737,6 +803,7 @@ class Typist:
         if self.pend:                                   # теги/скобки, которые исходный текст не закрывал
             await self._delete_until(self.tail0, "junk_removed")
             self.pend = ""
+        await self._flush()
         self.stats["duration"] = self.now() - self.t0
         return self.stats
 

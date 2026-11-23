@@ -52,6 +52,8 @@ def _check(d: dict) -> None:
         bad("SWAP_SHARE + DOUBLE_SHARE не должны быть больше 1")
     if d["PAUSES"] < 0 or d["FATIGUE_MINUTES"] <= 0:
         bad("PAUSES >= 0 и FATIGUE_MINUTES > 0")
+    if d["TURBO_FROM_WPM"] < 0:
+        bad("TURBO_FROM_WPM не может быть отрицательным (0 — выключить)")
     lo, hi = d["KEY_HOLD_MS"]
     if not (0 < lo <= hi):
         bad("KEY_HOLD_MS = (от, до), 0 < от <= до")
