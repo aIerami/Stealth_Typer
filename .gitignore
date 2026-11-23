@@ -1,6 +1,6 @@
 edge_user_data/
+edge_debug_profile/
 __pycache__/
 *.pyc
-stealth-env/
-.env
-error_*.png
+stealth_typer.log
+error_screenshot.png
