@@ -61,14 +61,53 @@ def _check(d: dict) -> None:
         bad("FIELD_INDEX не может быть отрицательным")
 
 
+def mojibake_candidates(text: str):
+    """Варианты «починки» строки, испорченной Windows при запуске из .bat / os.system:
+    UTF-8 или cp1251, прочитанные как cp866/cp437/cp1251/cp1252. Первым идёт исходный вариант."""
+    seen, out = set(), []
+
+    def add(v):
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+
+    add(text)
+    for wrong in ("cp866", "cp1251", "cp437", "cp850", "cp1252", "latin-1"):
+        for right in ("utf-8", "cp1251"):
+            if wrong == right:
+                continue
+            try:
+                add(text.encode(wrong).decode(right))
+            except (UnicodeError, LookupError):
+                pass
+    return out
+
+
+def resolve_site_name(name: str, known) -> str:
+    """Найти профиль по имени. Терпимо к регистру и к «кракозябрам» из-за кодировки Windows."""
+    known = list(known)
+    if name in known:
+        return name
+    for cand in mojibake_candidates(name):
+        for k in known:
+            if cand == k or cand.casefold() == k.casefold():
+                return k
+    return name
+
+
 def build(site=None, overrides=None) -> SimpleNamespace:
     """Собрать настройки. site=None → ACTIVE_SITE из config.py."""
     d = defaults()
     name = site if site is not None else _cfg.ACTIVE_SITE
     if name:
+        name = resolve_site_name(name, _cfg.SITES)
         if name not in _cfg.SITES:
             known = ", ".join(_cfg.SITES) or "(пусто)"
-            raise ConfigError(f"Профиль сайта «{name}» не найден. Есть: {known}")
+            hint = ""
+            if not name.isascii():
+                hint = (" Похоже, кириллица в имени испортилась при запуске (так бывает в .bat-файлах и os.system). "
+                        "Назовите профиль латиницей, например my_site, и запускайте с ним.")
+            raise ConfigError(f"Профиль сайта «{name}» не найден. Есть: {known}.{hint}")
         for k, v in _cfg.SITES[name].items():
             if k not in d:
                 raise ConfigError(f"В профиле «{name}» неизвестная настройка «{k}» (опечатка?)")

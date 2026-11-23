@@ -402,11 +402,53 @@ class TestNatural(unittest.TestCase):
         self.assertLess(n1, n2)
 
 
+class TestMojibake(unittest.TestCase):
+    NAME = "мой_сайт"
+
+    def setUp(self):
+        import config
+        config.SITES[self.NAME] = {"WPM_MIN": 51}
+        self.addCleanup(config.SITES.pop, self.NAME, None)
+
+    def test_utf8_read_as_oem_codepages(self):
+        for enc in ("cp866", "cp1251", "cp437", "cp850"):
+            garbled = self.NAME.encode("utf-8").decode(enc, errors="replace")
+            self.assertEqual(settings.build(site=garbled).WPM_MIN, 51, enc)
+
+    def test_ansi_bat_read_as_cp866(self):
+        garbled = self.NAME.encode("cp1251").decode("cp866")
+        self.assertEqual(settings.build(site=garbled).SITE_NAME, self.NAME)
+
+    def test_case_insensitive_and_unknown(self):
+        self.assertEqual(settings.build(site=self.NAME.upper()).SITE_NAME, self.NAME)
+        with self.assertRaises(settings.ConfigError):
+            settings.build(site="╨╜╨╡╤В")
+
+
 class TestSettings(unittest.TestCase):
     def test_site_profile(self):
-        c = settings.build(site="пример_ручной_курсор")
+        c = settings.build(site="example_manual_cursor")
         self.assertEqual(c.CURSOR_MODE, "manual")
         self.assertEqual(c.WPM_MAX, 110)
+
+    def test_site_name_mojibake_is_repaired(self):
+        import config
+        config.SITES["мой_сайт"] = {"WPM_MAX": 99}
+        try:
+            for enc in ("cp866", "cp1251", "cp437"):
+                garbled = "мой_сайт".encode("utf-8").decode(enc, errors="strict") \
+                    if enc != "cp437" else None
+                if garbled is None:
+                    continue
+                self.assertEqual(settings.build(site=garbled).WPM_MAX, 99, enc)
+            self.assertEqual(settings.build(site="МОЙ_САЙТ").WPM_MAX, 99)    # регистр
+        finally:
+            del config.SITES["мой_сайт"]
+
+    def test_unknown_site_garbled_hint(self):
+        with self.assertRaises(settings.ConfigError) as cm:
+            settings.build(site="╨╝╨╛╨╣_x")
+        self.assertIn("латиницей", str(cm.exception))
 
     def test_unknown_site(self):
         with self.assertRaises(settings.ConfigError):

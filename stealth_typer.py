@@ -36,6 +36,11 @@ def log(msg: str = "") -> None:
 
 def load_text(cfg, path_override=None) -> str:
     path = settings.resolve_path(path_override or cfg.TEXT_FILE)
+    if path_override and not path.is_file():
+        for cand in settings.mojibake_candidates(path_override):   # кириллица в имени испортилась в .bat
+            if settings.resolve_path(cand).is_file():
+                path = settings.resolve_path(cand)
+                break
     text = ""
     if path.is_file():
         text = path.read_text(encoding="utf-8-sig")

@@ -351,6 +351,23 @@ async def find_dom(page, selector, index, manual, timeout_ms):
 # 4. Сессия браузера: launch / attach
 # ============================================================
 
+def _scheme_candidates(cfg):
+    """Значения color_scheme для Patchright/Playwright. «system» = снять принудительную светлую тему.
+    Разные версии называют «сброс» по-разному ("null" / "no-override"), поэтому пробуем по очереди."""
+    return ["null", "no-override", None]
+
+
+async def _try_variants(fn, variants, what, log):
+    last = None
+    for v in variants:
+        try:
+            return await fn(v)
+        except Exception as e:      # неподходящее значение отвергается до запуска браузера
+            last = e
+    log(f"[!] Не удалось применить {what}: {last}")
+    return None
+
+
 class Session:
     def __init__(self, context, page, owned, browser=None):
         self.context, self.page, self.owned, self.browser = context, page, owned, browser
@@ -432,10 +449,17 @@ async def _pick_tab(pages, cfg, log):
 
 async def open_session(p, cfg, log=print) -> Session:
     if cfg.BROWSER_MODE == "launch":
-        ctx = await p.chromium.launch_persistent_context(
-            user_data_dir=str(settings.resolve_path(cfg.USER_DATA_DIR)),
-            channel=cfg.BROWSER_CHANNEL, headless=False, no_viewport=True, args=[],
-        )
+        async def _launch(scheme):
+            kw = dict(user_data_dir=str(settings.resolve_path(cfg.USER_DATA_DIR)),
+                      channel=cfg.BROWSER_CHANNEL, headless=False, no_viewport=True, args=[])
+            if scheme is not None:
+                kw["color_scheme"] = scheme
+            return await p.chromium.launch_persistent_context(**kw)
+
+        # По умолчанию Playwright принудительно включает СВЕТЛУЮ тему; мы это снимаем (тема всегда системная)
+        ctx = await _try_variants(_launch, _scheme_candidates(cfg), "запуск браузера", log)
+        if ctx is None:
+            raise RuntimeError("Не удалось запустить браузер.")
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         page.set_default_timeout(cfg.PAGE_LOAD_TIMEOUT_MS)
         if cfg.TARGET_URL:
@@ -466,6 +490,9 @@ async def open_session(p, cfg, log=print) -> Session:
     ctx = browser.contexts[0]
     page = await _pick_tab(ctx.pages, cfg, log)
     page.set_default_timeout(cfg.PAGE_LOAD_TIMEOUT_MS)
+    # при подключении Playwright тоже может навязать светлую тему — возвращаем системную (или заданную)
+    await _try_variants(lambda v: page.emulate_media(color_scheme=v), _scheme_candidates(cfg),
+                        "настройку темы", log)
     if cfg.ATTACH_GOTO and cfg.TARGET_URL:
         await page.goto(cfg.TARGET_URL, wait_until="domcontentloaded")
     log(f"[i] Подключился к вкладке: {page.url[:90]}")
