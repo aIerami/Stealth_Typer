@@ -197,6 +197,7 @@ _LEAD_WS = re.compile(r"[ \t]*")
 _PAIRS = {"(": ")", "[": "]", "{": "}", '"': '"', "'": "'", "`": "`"}
 _CLOSER_CHARS = set(")]}\"'`")
 _TYPO_SAFE_LOOKAHEAD = set(" .,;:-")
+_SYNC_CHARS = set(">\n()[]{}\"'`")
 
 
 def _opened_tag(recent: str):
@@ -250,6 +251,9 @@ class Typist:
         self.tail0 = 0
         self.in_indent = True
         self.t0 = 0.0
+        self._since_sync = 0
+        self._ac_seen = False          # сайт хоть раз вставлял закрывающий тег
+        self._ac_misses = 0            # сколько раз подряд ждали тег, а его не было
         self.stats = dict(typos=0, junk_removed=0, indent_fixed=0, anomalies=0, skipped_tags=0,
                           chars=0, wpm_sum=0.0, wpm_min=1e9, wpm_max=0.0, duration=0.0)
         self._last_progress = 0.0
@@ -268,7 +272,19 @@ class Typist:
 
     # ---------- время ----------
 
+    def _scale(self) -> float:
+        """Фиксированные «человеческие» задержки (пауза на Shift, реакция на опечатку, взгляд вниз...)
+        ужимаются при высокой скорости: на 70 WPM и ниже они как есть, на 500 WPM — примерно в 7 раз короче."""
+        return min(1.0, 70.0 / max(1.0, self.speed.wpm()))
+
     async def _sleep(self, s: float) -> None:
+        """Задержка, масштабируемая под скорость."""
+        s *= self._scale()
+        if s > 0:
+            await self._sleep_fn(s)
+
+    async def _raw(self, s: float) -> None:
+        """Точная задержка (время удержания клавиши, интервал между клавишами, ожидание сайта)."""
         if s > 0:
             await self._sleep_fn(s)
 
@@ -287,7 +303,7 @@ class Typist:
             await self._sleep(self.rng.uniform(0.02, 0.07))
         typ = "keyDown" if k.text else "rawKeyDown"
         await self._key(typ, k, mods, k.text)
-        await self._sleep(hold)
+        await self._raw(hold)
         await self._key("keyUp", k, mods)
         if k.shift:
             await self._sleep(self.rng.uniform(0.01, 0.05))
@@ -300,7 +316,7 @@ class Typist:
 
     async def _tap(self, k: Key) -> None:
         """Служебная клавиша (стрелка, Home, End, Backspace...) в спокойном темпе."""
-        await self._press(k, self.rng.uniform(0.03, 0.08))
+        await self._press(k, self.rng.uniform(0.03, 0.08) * self._scale())
         await self._sleep(self.rng.uniform(0.03, 0.09))
 
     def _units(self, ch: str) -> int:
@@ -354,13 +370,18 @@ class Typist:
             tail = total - off
             exp_tail = self.tail0 + self._u(self.pend)
 
-        if wait_growth and self.cfg.AUTOCLOSE_WAIT_MS > 0 and tail <= exp_tail:
+        if (wait_growth and self.cfg.AUTOCLOSE_WAIT_MS > 0 and tail <= exp_tail
+                and (self._ac_seen or self._ac_misses < 3)):
             waited = 0
             while waited < self.cfg.AUTOCLOSE_WAIT_MS and tail <= exp_tail:
-                await self._sleep(0.025)
+                await self._raw(0.025)
                 waited += 25
                 off, total = await self._state()
                 tail = total - off
+            if tail > exp_tail:
+                self._ac_seen, self._ac_misses = True, 0
+            else:
+                self._ac_misses += 1       # у сайта нет автозакрытия тегов — после 3 раз ждать перестаём
 
         # 1) справа от курсора появилось лишнее
         if tail > exp_tail:
@@ -598,9 +619,14 @@ class Typist:
 
         opened = _opened_tag("".join(self.stack[-200:])) if ch == ">" else None
         pair = ch if (ch in _PAIRS and not closer) else None
-        await self._sync(wait_growth=bool(opened), after_newline=(ch == "\n"),
-                         opened=opened, pair=pair, closer=closer)
-        await self._sleep(max(0.004, interval - hold))
+        # состояние редактора читаем там, где он может что-то вставить сам (скобки, кавычки, «>», Enter),
+        # и раз в 20 знаков для страховки; на обычных буквах лишних запросов к браузеру нет
+        self._since_sync += 1
+        if ch in _SYNC_CHARS or closer or self._since_sync >= 20:
+            self._since_sync = 0
+            await self._sync(wait_growth=bool(opened), after_newline=(ch == "\n"),
+                             opened=opened, pair=pair, closer=closer)
+        await self._raw(max(0.004, interval - hold))
 
         if ch == "\n":
             self.in_indent = True
@@ -618,9 +644,9 @@ class Typist:
             ch = self.stack.pop()
             self.cur_len -= self._units(ch)
             hold = self.rng.uniform(0.03, 0.07)
-            await self._press(BACKSPACE, hold)
-            await self._sync()
+            await self._press(BACKSPACE, hold * self._scale())
             await self._sleep(self.rng.uniform(0.04, 0.10))
+        await self._sync()
         line = "".join(self.stack).rsplit("\n", 1)[-1]
         self.in_indent = line.strip(" \t") == ""
 
@@ -706,7 +732,7 @@ class Typist:
             self._progress(i, n)
         # финальный «добор»: сайт мог вставить закрывающий тег с задержкой
         if self.cfg.AUTOCLOSE_WAIT_MS > 0:
-            await self._sleep(min(0.4, self.cfg.AUTOCLOSE_WAIT_MS / 1000.0))
+            await self._raw(min(0.4, self.cfg.AUTOCLOSE_WAIT_MS / 1000.0))
             await self._sync()
         if self.pend:                                   # теги/скобки, которые исходный текст не закрывал
             await self._delete_until(self.tail0, "junk_removed")
