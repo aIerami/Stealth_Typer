@@ -2,9 +2,9 @@
 """
 Stealth Typer — посимвольный ввод текста в браузере (Edge) с человеческим ритмом.
 
-Запуск:   python stealth_typer.py [--site ИМЯ] [--text ФАЙЛ] [--mode launch|attach]
+Запуск:   python app/stealth_typer.py [--site ИМЯ] [--text ФАЙЛ] [--mode launch|attach]
                                   [--cursor auto|manual] [--wpm 50-80] [--dry-run] [--list]
-Все настройки — в config.py.
+Все настройки — в config/config.py.
 """
 
 import argparse
@@ -183,7 +183,8 @@ async def run(cfg, text: str) -> int:
             log(traceback.format_exc())
             if cfg.SCREENSHOT_ON_ERROR:
                 try:
-                    shot = settings.SCRIPT_DIR / "error_screenshot.png"
+                    shot = settings.resolve_path("data/error_screenshot.png")
+                    shot.parent.mkdir(parents=True, exist_ok=True)
                     await page.screenshot(path=str(shot))
                     log(f"[i] Скриншот: {shot}")
                 except Exception:
@@ -231,6 +232,7 @@ def main(argv=None) -> int:
         cfg = settings.build(site=args.site, overrides=ov)
         if cfg.LOG_FILE:
             LOG_PATH = settings.resolve_path(cfg.LOG_FILE)
+            LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         if cfg.SITE_NAME:
             log(f"[i] Профиль сайта: {cfg.SITE_NAME}")
         if args.list:

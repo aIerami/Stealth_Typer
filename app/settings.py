@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """Загрузка и проверка настроек: общие + профиль сайта + параметры командной строки."""
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import config as _cfg
+# Структура проекта:  <корень>/app (код), <корень>/config (config.py), <корень>/texts, <корень>/data
+ROOT_DIR = Path(__file__).resolve().parent.parent
+SCRIPT_DIR = ROOT_DIR          # старое имя, оставлено для совместимости
+sys.path.insert(0, str(ROOT_DIR / "config"))
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+import config as _cfg  # noqa: E402
 
 _SKIP = {"SITES", "ACTIVE_SITE"}
 
@@ -21,7 +25,7 @@ def defaults() -> dict:
 
 def resolve_path(p: str) -> Path:
     path = Path(p)
-    return path if path.is_absolute() else SCRIPT_DIR / path
+    return path if path.is_absolute() else ROOT_DIR / path
 
 
 def _check(d: dict) -> None:

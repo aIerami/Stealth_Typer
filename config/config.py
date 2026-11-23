@@ -9,7 +9,7 @@
   2. В разделе SITES можно описать профили конкретных сайтов: в профиле
      указывается только то, что отличается от общих настроек.
   3. ACTIVE_SITE — какой профиль использовать. Можно не менять файл, а
-     выбирать профиль при запуске:  python stealth_typer.py --site мой_сайт
+     выбирать профиль при запуске:  python app/stealth_typer.py --site мой_сайт
 
 Любую настройку можно временно переопределить из командной строки,
 см. README.md (--text, --mode, --cursor, --wpm, --dry-run, --list).
@@ -26,12 +26,12 @@
 BROWSER_MODE = "launch"
 
 BROWSER_CHANNEL = "msedge"          # "msedge" / "chrome" / "chromium"
-USER_DATA_DIR = "edge_user_data"    # профиль для режима launch (путь от папки скрипта)
+USER_DATA_DIR = "data/edge_user_data"    # профиль для режима launch (путь от корня проекта)
 
 # --- только для BROWSER_MODE = "attach" ---
 DEBUG_PORT = 9222                   # порт отладки Edge
 AUTO_START_EDGE = True              # True: если Edge с портом не найден — запустить его самим
-                                    #       (отдельный профиль edge_debug_profile, не ваш основной)
+                                    #       (отдельный профиль data/edge_debug_profile, не ваш основной)
 ATTACH_TAB = ""                     # часть адреса или заголовка нужной вкладки.
                                     # Пусто: берётся видимая вкладка, а если их несколько — спросит.
 ATTACH_GOTO = False                 # True: в режиме attach тоже перейти на TARGET_URL
@@ -56,7 +56,7 @@ CURSOR_MODE = "auto"
 # Только для CURSOR_MODE = "auto":
 FIELD_SELECTOR = ""                 # CSS-селектор поля. Пусто — для Monaco берётся редактор
                                     # по номеру FIELD_INDEX (видимые редакторы, сверху вниз).
-                                    # Список редакторов на странице:  python stealth_typer.py --list
+                                    # Список редакторов на странице:  python app/stealth_typer.py --list
 FIELD_INDEX = 0                     # номер редактора/совпадения (с нуля)
 CURSOR_LINE = "end"                 # "end" — конец документа, "start" — начало, или номер строки (1, 2, ...)
 CURSOR_COLUMN = "end"               # "end" — конец строки, или номер колонки (1, 2, ...)
@@ -65,7 +65,7 @@ CURSOR_COLUMN = "end"               # "end" — конец строки, или 
 # 3. ТЕКСТ
 # ==============================================================
 
-TEXT_FILE = "input_text.txt"        # файл с текстом (UTF-8). Отступы сохраняются как есть.
+TEXT_FILE = "input_text.txt"      # файл с текстом (UTF-8). Отступы сохраняются как есть.
 TEXT_INLINE = ""                    # запасной текст, если файла нет
 TRIM_TRAILING_NEWLINES = True       # убрать пустые строки в самом конце файла
 
@@ -127,7 +127,7 @@ AUTOCLOSE_WAIT_MS = 300             # сколько ждать, пока сай
 KEEP_BROWSER_OPEN = True            # launch: оставить окно открытым после ввода
 VERIFY_RESULT = True                # сверить текст в редакторе с исходным после ввода
 SCREENSHOT_ON_ERROR = True
-LOG_FILE = "stealth_typer.log"      # пусто — не писать лог в файл
+LOG_FILE = "data/stealth_typer.log"    # пусто — не писать лог в файл
 RANDOM_SEED = None                  # число — повторяемый «почерк» (для отладки); None — случайно
 
 # ==============================================================

@@ -402,7 +402,7 @@ def _start_edge(cfg, log):
     exe = _edge_path()
     if not exe:
         raise RuntimeError("Edge не найден. Запустите его сами: start_edge_debug.bat")
-    profile = settings.resolve_path("edge_debug_profile")
+    profile = settings.resolve_path("data/edge_debug_profile")
     args = [exe, f"--remote-debugging-port={cfg.DEBUG_PORT}", f"--user-data-dir={profile}", "--no-first-run"]
     log(f"[i] Запускаю Edge с отладочным портом {cfg.DEBUG_PORT} (профиль: {profile})")
     kw = {}
@@ -536,7 +536,7 @@ async def resolve_target(page, cfg, log=print):
             break
         await asyncio.sleep(0.5)
     hint = ("Проверьте FIELD_SELECTOR/FIELD_INDEX. Посмотреть редакторы на странице: "
-            "python stealth_typer.py --list")
+            "python app/stealth_typer.py --list")
     if not cfg.FIELD_SELECTOR:
         hint = ("Monaco-редактор не найден. Для обычных полей укажите FIELD_SELECTOR. " + hint)
     raise RuntimeError("Поле не найдено. " + hint)
